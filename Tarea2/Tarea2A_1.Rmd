@@ -1,0 +1,287 @@
+---
+title: "Reporte Ejecutivo: Análisis Bootstrap y Monte Carlo para la Estimación de $\tau(\theta) = P(X=0)$ en una Distribución Poisson"
+author: "Omar Flores (Basado en el script R proporcionado)"
+date: "`r format(Sys.Date(), '%d de %B de %Y')`"
+output: 
+  pdf_document:
+    fig_caption: yes
+    keep_tex: yes # Útil para depuración de LaTeX
+documentclass: article
+classoption: [11pt, a4paper]
+lang: es
+geometry: "a4paper, margin=1in"
+header-includes:
+  - '\usepackage{amsmath}'
+  - '\usepackage{amsfonts}'
+  - '\usepackage{amssymb}'
+  - '\usepackage{booktabs}'
+  - '\usepackage{float}'
+  - '\usepackage{caption}' # Para personalizar captions si es necesario
+  - '\captionsetup[figure]{labelsep=period, font=small}' # Ejemplo de personalización
+  - '\captionsetup[table]{labelsep=period, font=small}'
+abstract: |
+  Este reporte presenta los resultados de análisis estadísticos realizados para estimar el parámetro $\tau(\theta) = e^{-\theta} = P(X=0)$ de una distribución Poisson, utilizando el estimador UMVUE $\hat{\tau} = \left(\frac{n-1}{n}\right)^{\sum X_i}$. Se aplicaron métodos de Monte Carlo y bootstrap no paramétrico según lo especificado, y se evaluó el desempeño de los intervalos de confianza bootstrap. Todos los análisis se implementaron en R, utilizando `set.seed(1234)` para reproducibilidad. Las cifras y tablas aquí presentadas se derivan de la ejecución de dicho script.
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.align = 'center', message = FALSE, warning = FALSE)
+# Las opciones de fig.cap = TRUE a nivel global o por chunk son importantes para que las captions de R se usen.
+# echo = FALSE por defecto para el reporte final, a menos que se especifique lo contrario.
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE) 
+set.seed(1234)
+```
+
+```{r define_funciones, echo=FALSE}
+# --- Funciones Auxiliares ---
+# Estimador para tau(theta) = P(X=0) usando la UMVUE proporcionada
+calcular_tau_hat <- function(datos_muestra) {
+  n_val <- length(datos_muestra)
+  if (n_val == 0) {
+    warning("La muestra está vacía.")
+    return(NA) 
+  }
+  if (n_val == 1) { 
+    if (datos_muestra[1] == 0) return(1) else return(0)
+  }
+  suma_xi <- sum(datos_muestra)
+  return(((n_val - 1) / n_val)^suma_xi)
+}
+```
+
+```{r parte_a_simulacion_mc, echo=FALSE}
+# Parámetros
+theta_verdadero_a <- 1.3
+n_a <- 20
+B_mc_a <- 10000
+tau_hat_mc_valores <- numeric(B_mc_a)
+for (b in 1:B_mc_a) {
+  muestra_mc <- rpois(n = n_a, lambda = theta_verdadero_a)
+  tau_hat_mc_valores[b] <- calcular_tau_hat(muestra_mc)
+}
+E_tau_hat_mc <- mean(tau_hat_mc_valores, na.rm = TRUE)
+V_tau_hat_mc <- var(tau_hat_mc_valores, na.rm = TRUE)
+tau_verdadero_a <- exp(-theta_verdadero_a)
+```
+
+```{r parte_b_bootstrap, echo=FALSE}
+# Muestra observada
+muestra_obs_b <- c(1, 2, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0)
+n_b <- length(muestra_obs_b)
+B_boot_b <- 10000
+alpha_b <- 0.05 
+tau_hat_obs_b <- calcular_tau_hat(muestra_obs_b)
+tau_hat_boot_valores_b <- numeric(B_boot_b)
+for (b_iter in 1:B_boot_b) {
+  muestra_boot_b <- sample(muestra_obs_b, size = n_b, replace = TRUE)
+  tau_hat_boot_valores_b[b_iter] <- calcular_tau_hat(muestra_boot_b)
+}
+V_tau_hat_boot_b <- var(tau_hat_boot_valores_b, na.rm = TRUE)
+CI_tau_boot_b <- quantile(tau_hat_boot_valores_b, probs = c(alpha_b / 2, 1 - alpha_b / 2), na.rm = TRUE)
+```
+
+```{r parte_c_simulacion_cobertura, echo=FALSE, cache=TRUE}
+# Parámetros
+M_c <- 1000 
+theta_verdadero_c <- 1.3
+n_c <- 20
+B_boot_c <- 10000 
+alpha_c <- 0.05
+tau_verdadero_c <- exp(-theta_verdadero_c)
+indicadores_cobertura_Z <- logical(M_c)
+# cat("Iniciando estudio de simulación para cobertura (Parte C). Esto puede tardar...\n") # Removido para no imprimir en PDF
+for (m_iter in 1:M_c) {
+  # if (m_iter %% (M_c/10) == 0) { 
+  #   cat("  Simulación ", m_iter, " de ", M_c, "...\n") # Removido
+  # }
+  muestra_sim_c <- rpois(n = n_c, lambda = theta_verdadero_c)
+  tau_hat_boot_valores_c_actual <- numeric(B_boot_c)
+  for (b_iter_c in 1:B_boot_c) {
+    muestra_boot_c_actual <- sample(muestra_sim_c, size = n_c, replace = TRUE)
+    tau_hat_boot_valores_c_actual[b_iter_c] <- calcular_tau_hat(muestra_boot_c_actual)
+  }
+  CI_c_actual <- quantile(tau_hat_boot_valores_c_actual,
+                          probs = c(alpha_c / 2, 1 - alpha_c / 2),
+                          na.rm = TRUE) 
+  if (!any(is.na(CI_c_actual))) { 
+    indicadores_cobertura_Z[m_iter] <- (tau_verdadero_c >= CI_c_actual[1] && tau_verdadero_c <= CI_c_actual[2])
+  } else {
+    indicadores_cobertura_Z[m_iter] <- FALSE 
+  }
+}
+# cat("Estudio de simulación para cobertura (Parte C) completado.\n") # Removido
+cobertura_observada_c <- mean(indicadores_cobertura_Z, na.rm = TRUE)
+nivel_confianza_nominal_c <- 1 - alpha_c
+num_coberturas_c <- sum(indicadores_cobertura_Z, na.rm = TRUE) # Renombrado para evitar colisión de namespace
+# Asegurarse que M_c_binom_test no sea NA y sea el número real de pruebas válidas si hay NAs en indicadores_cobertura_Z
+M_c_binom_test <- sum(!is.na(indicadores_cobertura_Z))
+if(M_c_binom_test > 0) {
+  prueba_binomial_cobertura <- binom.test(x = num_coberturas_c,
+                                          n = M_c_binom_test, 
+                                          p = nivel_confianza_nominal_c)
+  p_valor_binomial_c <- prueba_binomial_cobertura$p.value
+} else {
+  p_valor_binomial_c <- NA # O algún otro manejo de error
+}
+```
+
+\hrulefill
+
+\hrulefill
+\vspace{1em}
+
+\section{Introducción}
+El objetivo principal es la estimación del parámetro $\tau(\theta) = e^{-\theta}$, que representa la probabilidad de observar un cero en una variable aleatoria $X$ que sigue una distribución de Poisson con parámetro $\theta$. El estimador utilizado es $\hat{\tau} = \left(\frac{n-1}{n}\right)^{\sum_{i=1}^n X_i}$, el cual se indica es el estimador insesgado de mínima varianza uniforme (UMVUE) de $\tau(\theta)$.
+
+Este reporte se divide en tres partes principales:
+\begin{enumerate}
+    \item \textbf{Simulación Monte Carlo (MC):} Aproximación del valor esperado $E(\hat{\tau})$ y la varianza $V(\hat{\tau})$ cuando $\theta$ es conocido.
+    \item \textbf{Bootstrap No Paramétrico:} Estimación de $\tau(\theta)$, $V(\hat{\tau})$ y construcción de un intervalo de confianza para $\tau(\theta)$ a partir de una muestra observada específica, sin asumir conocimiento de $\theta$.
+    \item \textbf{Estudio de Simulación de Cobertura:} Evaluación de la probabilidad de cobertura de los intervalos de confianza bootstrap no paramétricos.
+\end{enumerate}
+Para todos los análisis inferenciales no especificados, se utiliza un nivel de significancia $\alpha = 0.05$.
+
+\section{Parte a: Simulación Monte Carlo (Distribución Conocida)}
+En esta sección, se utiliza el método Monte Carlo para aproximar el valor esperado y la varianza del estimador $\hat{\tau}$. Se asume que los datos provienen de una distribución Poisson($\theta$) con $\theta = `r theta_verdadero_a`$, y se generan muestras de tamaño $n=`r n_a`$. Se realizaron $B = `r format(B_mc_a, big.mark=",")`$ réplicas Monte Carlo.
+
+\subsection{Metodología}
+Para cada una de las $B=`r format(B_mc_a, big.mark=",")`$ réplicas:
+\begin{enumerate}
+    \item Se generó una muestra aleatoria $X_1, \dots, X_{`r n_a`}$ de una distribución Poisson($\theta=`r theta_verdadero_a`$).
+    \item Se calculó $\hat{\tau}_b = \left(\frac{`r n_a`-1}{`r n_a`}\right)^{\sum X_i}$ para la muestra $b$.
+\end{enumerate}
+Luego, $E(\hat{\tau})$ se aproximó por $\frac{1}{B}\sum_{b=1}^B \hat{\tau}_b$ y $V(\hat{\tau})$ por $\frac{1}{B-1}\sum_{b=1}^B (\hat{\tau}_b - \bar{\hat{\tau}})^2$.
+
+\subsection{Resultados}
+El valor verdadero de $\tau(\theta)$ para $\theta=`r theta_verdadero_a`$ es $\tau(`r theta_verdadero_a`) = e^{-`r theta_verdadero_a`}$.
+Los resultados obtenidos de la simulación Monte Carlo se resumen en la Tabla \ref{tab:mc_results}.
+
+\begin{table}[H]
+    \centering
+    \caption{Resultados de la Simulación Monte Carlo para $\hat{\tau}$ ($\theta=`r theta_verdadero_a`$, $n=`r n_a`$, $B=`r format(B_mc_a, big.mark=",")`$)}
+    \label{tab:mc_results}
+    \begin{tabular}{lc}
+        \toprule
+        Métrica & Valor \\
+        \midrule
+        Valor verdadero $\tau(`r theta_verdadero_a`) = e^{-`r theta_verdadero_a`}$ & `r sprintf("%.5f", tau_verdadero_a)` \\
+        Estimación MC de $E(\hat{\tau})$ & `r sprintf("%.5f", E_tau_hat_mc)` \\
+        Estimación MC de $V(\hat{\tau})$ & `r sprintf("%.7f", V_tau_hat_mc)` \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+El histograma de las $`r format(B_mc_a, big.mark=",")`$ estimaciones $\hat{\tau}_b$ obtenidas se muestra en la Figura \@ref(fig:hist-mc-a).
+
+```{r hist-mc-a, fig.cap="Histograma de las estimaciones $\\hat{\\tau}$ obtenidas mediante simulación Monte Carlo. La línea roja discontinua indica el valor verdadero $\\tau(1.3)$ y la línea azul punteada indica la media de las estimaciones MC.", echo=FALSE, fig.width=7, fig.height=5}
+hist(tau_hat_mc_valores,
+     main = expression(paste("Histograma de Estimaciones MC de ", hat(tau))),
+     xlab = expression(hat(tau)),
+     ylab = "Frecuencia",
+     breaks = 50,
+     col = "lightblue",
+     border = "black")
+abline(v = tau_verdadero_a, col = "red", lwd = 2, lty = 2)
+abline(v = E_tau_hat_mc, col = "blue", lwd = 2, lty = 3)
+legend("topright",
+       legend = c(paste("tau(", theta_verdadero_a, ") =", round(tau_verdadero_a, 4)),
+                  paste("E_MC(hat(tau)) =", round(E_tau_hat_mc, 4))),
+       col = c("red", "blue"),
+       lwd = 2, lty = c(2, 3))
+```
+
+\section{Parte b: Bootstrap No Paramétrico (Muestra Observada)}
+En esta sección, se utiliza el método bootstrap no paramétrico para analizar el estimador $\hat{\tau}$ a partir de una única muestra observada, sin suponer conocimiento previo de $\theta$ o la forma exacta de la distribución (aunque el estimador $\hat{\tau}$ se deriva bajo el supuesto Poisson).
+
+\subsection{Datos y Metodología}
+La muestra observada es $X = (`r paste(muestra_obs_b, collapse=", ")`)$, con $n=`r n_b`$.
+Se generaron $B=`r format(B_boot_b, big.mark=",")`$ muestras bootstrap:
+\begin{enumerate}
+    \item Se calculó $\hat{\tau}_{obs}$ a partir de la muestra original.
+    \item Para cada una de las $B=`r format(B_boot_b, big.mark=",")`$ réplicas bootstrap:
+    \begin{enumerate}
+        \item Se generó una muestra bootstrap $X_1^*, \dots, X_{`r n_b`}^*$ muestreando con reemplazo de la muestra observada $X$.
+        \item Se calculó $\hat{\tau}_b^*$ para la muestra bootstrap $b$.
+    \end{enumerate}
+    \item La varianza de $\hat{\tau}$ se estimó como la varianza de las $\hat{\tau}_b^*$.
+    \item Se construyó un intervalo de confianza (IC) del `r (1-alpha_b)*100`\% para $\tau(\theta)$ utilizando el método de los percentiles sobre las $\hat{\tau}_b^*$.
+\end{enumerate}
+
+\subsection{Resultados}
+Los resultados del análisis bootstrap no paramétrico se resumen en la Tabla \ref{tab:boot_results_b}.
+
+\begin{table}[H]
+    \centering
+    \caption{Resultados del Bootstrap No Paramétrico para $\hat{\tau}$ (Muestra observada, $n=`r n_b`$, $B=`r format(B_boot_b, big.mark=",")`$)}
+    \label{tab:boot_results_b}
+    \begin{tabular}{lc}
+        \toprule
+        Métrica & Valor \\
+        \midrule
+        Estimación $\hat{\tau}_{obs}$ (de la muestra original) & `r sprintf("%.5f", tau_hat_obs_b)` \\
+        Estimación Bootstrap de $V(\hat{\tau})$ & `r sprintf("%.7f", V_tau_hat_boot_b)` \\
+        IC del `r (1-alpha_b)*100`\% para $\tau(\theta)$ (percentiles) & (`r sprintf("%.5f", CI_tau_boot_b[1])`, `r sprintf("%.5f", CI_tau_boot_b[2])`) \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+El histograma de las $`r format(B_boot_b, big.mark=",")`$ estimaciones bootstrap $\hat{\tau}_b^*$ se muestra en la Figura \@ref(fig:hist-bootstrap-b).
+
+```{r hist-bootstrap-b, fig.cap="Histograma de las estimaciones bootstrap $\\hat{\\tau}^*$. La línea azul discontinua indica $\\hat{\\tau}_{obs}$ y las líneas púrpuras punteadas los límites del IC del 95%.", echo=FALSE, fig.width=7, fig.height=5}
+hist(tau_hat_boot_valores_b,
+     main = expression(paste("Histograma de Estimaciones Bootstrap de ", hat(tau))),
+     xlab = expression(paste(hat(tau),"*")),
+     ylab = "Frecuencia",
+     breaks = 50,
+     col = "lightgreen",
+     border = "black")
+abline(v = tau_hat_obs_b, col = "blue", lwd = 2, lty = 2)
+abline(v = CI_tau_boot_b[1], col = "purple", lwd = 2, lty = 3)
+abline(v = CI_tau_boot_b[2], col = "purple", lwd = 2, lty = 3)
+legend("topright",
+       legend = c(paste("hat(tau)_obs =", round(tau_hat_obs_b, 4)), "Límites IC 95%"),
+       col = c("blue", "purple"),
+       lwd = 2, lty = c(2, 3))
+```
+
+Comentario sobre los resultados si la muestra proviniera de Poisson($\theta=`r theta_verdadero_a`$):
+El valor verdadero $\tau(`r theta_verdadero_a`) = e^{-`r theta_verdadero_a`} \approx `r round(exp(-theta_verdadero_a), 5)`$.
+La estimación observada $\hat{\tau}_{obs} = `r round(tau_hat_obs_b, 5)`$.
+El IC Bootstrap [`r round(CI_tau_boot_b[1], 5)`, `r round(CI_tau_boot_b[2], 5)`] **`r ifelse(exp(-theta_verdadero_a) >= CI_tau_boot_b[1] && exp(-theta_verdadero_a) <= CI_tau_boot_b[2], "contiene", "no contiene")`** el valor $\tau(`r theta_verdadero_a`)$.
+
+\section{Parte c: Estudio de Simulación para Cobertura del IC Bootstrap}
+Se realizó un estudio de simulación para evaluar el desempeño (probabilidad de cobertura) de los intervalos de confianza del `r (1-alpha_c)*100`\% obtenidos mediante el método bootstrap no paramétrico (percentiles) para $\hat{\tau}$.
+
+\subsection{Metodología}
+Se repitió el siguiente procedimiento $M=`r format(M_c, big.mark=",")`$ veces:
+\begin{enumerate}
+    \item Se generó una muestra aleatoria de tamaño $n=`r n_c`$ de una distribución Poisson($\theta=`r theta_verdadero_c`$). El verdadero valor del parámetro de interés es $\tau(`r theta_verdadero_c`) = e^{-`r theta_verdadero_c`}$.
+    \item Con esta muestra generada, se construyó un intervalo de confianza del `r (1-alpha_c)*100`\% para $\tau(\theta)$ usando el método bootstrap no paramétrico con $B=`r format(B_boot_c, big.mark=",")`$ réplicas (como en la Parte b).
+    \item Se verificó si el intervalo de confianza resultante contenía el valor verdadero $\tau(`r theta_verdadero_c`)$.
+\end{enumerate}
+La probabilidad de cobertura se estimó como la proporción de los $M$ intervalos que contenían el valor verdadero.
+
+\subsection{Resultados}
+Los resultados del estudio de simulación de cobertura se presentan en la Tabla \ref{tab:coverage_results_c}.
+
+\begin{table}[H]
+    \centering
+    \caption{Resultados del Estudio de Simulación de Cobertura del IC Bootstrap ($M=`r format(M_c, big.mark=",")`$ sims, $\theta=`r theta_verdadero_c`$, $n=`r n_c`$, $B=`r format(B_boot_c, big.mark=",")`$ por IC)}
+    \label{tab:coverage_results_c}
+    \begin{tabular}{lc}
+        \toprule
+        Métrica & Valor \\
+        \midrule
+        Nivel de Confianza Nominal & `r sprintf("%.2f", nivel_confianza_nominal_c)` \\
+        Probabilidad de Cobertura Observada & `r sprintf("%.4f", cobertura_observada_c)` \\
+        Número de ICs que cubrieron $\tau(`r theta_verdadero_c`)$ (de $M=`r format(M_c_binom_test, big.mark=",")`$) & `r num_coberturas_c` \\
+        $p$-valor (Prueba Binomial $H_0$: Cobertura = `r sprintf("%.2f", nivel_confianza_nominal_c)`) & `r if(!is.na(p_valor_binomial_c)) sprintf("%.4f", p_valor_binomial_c) else "N/A"` \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Conclusión de la prueba binomial: `r if(!is.na(p_valor_binomial_c)) { ifelse(p_valor_binomial_c < alpha_c, paste0("Se rechaza H0. La cobertura observada (", round(cobertura_observada_c, 3), ") difiere significativamente de la nominal (", nivel_confianza_nominal_c, ") al nivel alpha = ", alpha_c, "."), paste0("No se rechaza H0. La cobertura observada (", round(cobertura_observada_c, 3), ") no difiere significativamente de la nominal (", nivel_confianza_nominal_c, ") al nivel alpha = ", alpha_c, ".")) } else {"Prueba binomial no calculada debido a datos insuficientes."}`
+
+
+\vspace{2em}
+\hrulefill
+```
